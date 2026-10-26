@@ -36,9 +36,8 @@ import java.util.ArrayList;
 
 public class MainActivity extends Activity {
 
-    private static final String HOME = "https://duckduckgo.com";
-    private static final String SEARCH = "https://duckduckgo.com/?q=";
-
+    private static final String HOME = "https://google.com";
+        private static final String SEARCH = "https://google.com/search?q=";
     private final ArrayList<WebView> tabs = new ArrayList<>();
     private int currentIndex = 0;
 
