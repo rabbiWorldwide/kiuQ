@@ -6,6 +6,7 @@ import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.net.Uri;
@@ -32,14 +33,30 @@ import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 import android.widget.Toast;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
 
     private static final String HOME = "https://google.com";
-        private static final String SEARCH = "https://google.com/search?q=";
+    private static final String SEARCH = "https://google.com/search?q=";
+    private static final int MAX_HISTORY = 500;
+
+    private static class HistoryItem {
+        String title = "";
+        String url = "";
+        long time = 0;
+    }
+
     private final ArrayList<WebView> tabs = new ArrayList<>();
+    private final ArrayList<HistoryItem> history = new ArrayList<>();
     private int currentIndex = 0;
+    private SharedPreferences prefs;
 
     private FrameLayout webContainer;
     private EditText urlBar;
@@ -88,6 +105,7 @@ public class MainActivity extends Activity {
 
         @Override
         public void onPageFinished(WebView view, String url) {
+            addHistory(url, view.getTitle());
             if (view != current()) return;
             progress.setVisibility(View.GONE);
             if (!urlBar.hasFocus()) urlBar.setText(url);
@@ -178,6 +196,9 @@ public class MainActivity extends Activity {
         bottomBar = findViewById(R.id.bottomBar);
         btnTabs = findViewById(R.id.btnTabs);
 
+        prefs = getSharedPreferences("kiuq", Context.MODE_PRIVATE);
+        loadHistory();
+
         if (Build.VERSION.SDK_INT < 29
                 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -192,6 +213,108 @@ public class MainActivity extends Activity {
         if (data != null) start = data.toString();
         newTab(start);
     }
+
+    // ---------- History ----------
+
+    private void loadHistory() {
+        history.clear();
+        try {
+            JSONArray arr = new JSONArray(prefs.getString("history", "[]"));
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.getJSONObject(i);
+                HistoryItem h = new HistoryItem();
+                h.title = o.optString("t", "");
+                h.url = o.optString("u", "");
+                h.time = o.optLong("d", 0);
+                if (!h.url.isEmpty()) history.add(h);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void saveHistory() {
+        try {
+            JSONArray arr = new JSONArray();
+            for (HistoryItem h : history) {
+                JSONObject o = new JSONObject();
+                o.put("t", h.title);
+                o.put("u", h.url);
+                o.put("d", h.time);
+                arr.put(o);
+            }
+            prefs.edit().putString("history", arr.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void addHistory(String url, String title) {
+        if (url == null) return;
+        if (!(url.startsWith("http://") || url.startsWith("https://"))) return;
+        if (title == null) title = "";
+        long now = System.currentTimeMillis();
+        if (!history.isEmpty() && history.get(0).url.equals(url)) {
+            HistoryItem top = history.get(0);
+            top.time = now;
+            if (!title.isEmpty()) top.title = title;
+            saveHistory();
+            return;
+        }
+        HistoryItem h = new HistoryItem();
+        h.title = title;
+        h.url = url;
+        h.time = now;
+        history.add(0, h);
+        while (history.size() > MAX_HISTORY) {
+            history.remove(history.size() - 1);
+        }
+        saveHistory();
+    }
+
+    private void showHistory() {
+        if (history.isEmpty()) {
+            toast("History is empty");
+            return;
+        }
+        SimpleDateFormat fmt = new SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault());
+        CharSequence[] items = new CharSequence[history.size()];
+        for (int i = 0; i < history.size(); i++) {
+            HistoryItem h = history.get(i);
+            String t = h.title.isEmpty() ? h.url : h.title;
+            if (t.length() > 60) t = t.substring(0, 60) + "...";
+            String u = h.url;
+            if (u.length() > 60) u = u.substring(0, 60) + "...";
+            items[i] = t + "\n" + fmt.format(new Date(h.time)) + " - " + u;
+        }
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        b.setTitle("History (" + history.size() + ") - hold to delete");
+        b.setItems(items, (dlg, which) -> current().loadUrl(history.get(which).url));
+        b.setNegativeButton("Clear all", (dlg, which) -> confirmClearHistory());
+        final AlertDialog d = b.create();
+        d.show();
+        d.getListView().setOnItemLongClickListener((parent, view, position, id) -> {
+            if (position >= 0 && position < history.size()) {
+                history.remove(position);
+                saveHistory();
+            }
+            d.dismiss();
+            showHistory();
+            return true;
+        });
+    }
+
+    private void confirmClearHistory() {
+        new AlertDialog.Builder(this)
+                .setTitle("Clear all history?")
+                .setPositiveButton("Clear", (dlg, which) -> {
+                    history.clear();
+                    saveHistory();
+                    toast("History cleared");
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    // ---------- Tabs ----------
 
     private WebView current() {
         return tabs.isEmpty() ? null : tabs.get(currentIndex);
@@ -287,6 +410,7 @@ public class MainActivity extends Activity {
         b.setTitle("Tabs (" + tabs.size() + ") - hold to close");
         b.setItems(titles, (dlg, which) -> switchTo(which));
         b.setPositiveButton("+ New tab", (dlg, which) -> newTab(HOME));
+        b.setNeutralButton("History", (dlg, which) -> showHistory());
         final AlertDialog d = b.create();
         d.show();
         d.getListView().setOnItemLongClickListener((parent, view, position, id) -> {
@@ -296,6 +420,8 @@ public class MainActivity extends Activity {
             return true;
         });
     }
+
+    // ---------- Controls ----------
 
     private void setupControls() {
         urlBar.setOnEditorActionListener((v, actionId, event) -> {
@@ -317,7 +443,12 @@ public class MainActivity extends Activity {
         findViewById(R.id.btnForward).setOnClickListener(v -> {
             if (current().canGoForward()) current().goForward();
         });
-        findViewById(R.id.btnHome).setOnClickListener(v -> current().loadUrl(HOME));
+        View home = findViewById(R.id.btnHome);
+        home.setOnClickListener(v -> current().loadUrl(HOME));
+        home.setOnLongClickListener(v -> {
+            showHistory();
+            return true;
+        });
         findViewById(R.id.btnReload).setOnClickListener(v -> current().reload());
     }
 
@@ -395,4 +526,4 @@ public class MainActivity extends Activity {
         tabs.clear();
         super.onDestroy();
     }
-    }
+                                      }
