@@ -46,8 +46,8 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
 
-    private static final String HOME = "https://google.com";
-    private static final String SEARCH = "https://google.com/search?q=";
+    private static final String HOME = "https://search.brave.com";
+    private static final String SEARCH = "https://search.brave.com/search?q=";
     private static final int MAX_HISTORY = 500;
 
     private static class HistoryItem {
