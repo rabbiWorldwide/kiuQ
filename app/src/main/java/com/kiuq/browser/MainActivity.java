@@ -14,6 +14,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Message;
+import android.provider.DocumentsContract;
+import android.provider.Settings;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -36,6 +38,7 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -74,6 +77,11 @@ public class MainActivity extends Activity {
             Uri uri = request.getUrl();
             String scheme = uri.getScheme();
             if (scheme == null) return false;
+            if (scheme.equals("file")) {
+                // local pages may link to other local files; web pages may not
+                String cur = view.getUrl();
+                return !(cur != null && cur.startsWith("file:"));
+            }
             if (scheme.equals("http") || scheme.equals("https") || scheme.equals("about")
                     || scheme.equals("data") || scheme.equals("blob")
                     || scheme.equals("javascript")) {
@@ -200,18 +208,107 @@ public class MainActivity extends Activity {
         loadHistory();
 
         if (Build.VERSION.SDK_INT < 29
-                && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                && checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
                 != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
+            requestPermissions(new String[]{
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
         }
 
         CookieManager.getInstance().setAcceptCookie(true);
         setupControls();
 
-        String start = HOME;
         Uri data = getIntent().getData();
-        if (data != null) start = data.toString();
-        newTab(start);
+        if (data != null) {
+            openIncoming(data);
+        } else {
+            newTab(HOME);
+        }
+    }
+
+    // ---------- Local files ----------
+
+    private boolean hasFileAccess() {
+        if (Build.VERSION.SDK_INT >= 30) return Environment.isExternalStorageManager();
+        if (Build.VERSION.SDK_INT >= 29) return false;
+        return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void askAllFilesAccess() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Allow file access")
+                    .setMessage("To open local HTML files together with their CSS and JS, "
+                            + "turn on \"Allow access to manage all files\" for kiuQ, "
+                            + "then open the file again.")
+                    .setPositiveButton("Open settings", (dlg, which) -> {
+                        try {
+                            startActivity(new Intent(
+                                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                    Uri.parse("package:" + getPackageName())));
+                        } catch (Exception e) {
+                            startActivity(new Intent(
+                                    Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                        }
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+        } else if (Build.VERSION.SDK_INT < 29) {
+            requestPermissions(new String[]{
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
+        } else {
+            toast("Local file access is not supported on Android 10");
+        }
+    }
+
+    private String guessPath(Uri uri) {
+        try {
+            String auth = uri.getAuthority();
+            if ("com.android.externalstorage.documents".equals(auth)) {
+                String docId = DocumentsContract.getDocumentId(uri);
+                if (docId != null && docId.startsWith("primary:")) {
+                    return Environment.getExternalStorageDirectory().getPath()
+                            + "/" + docId.substring(8);
+                }
+                return null;
+            }
+            String decoded = Uri.decode(uri.toString());
+            int idx = decoded.indexOf("file:///");
+            if (idx >= 0) return decoded.substring(idx + 7);
+            String p = uri.getPath();
+            if (p != null) {
+                int j = p.indexOf("/storage/emulated/0/");
+                if (j >= 0) return p.substring(j);
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private void openIncoming(Uri data) {
+        String scheme = data.getScheme();
+        String target = data.toString();
+        if ("file".equals(scheme)) {
+            if (!hasFileAccess()) {
+                askAllFilesAccess();
+                newTab(HOME);
+                return;
+            }
+        } else if ("content".equals(scheme)) {
+            String path = guessPath(data);
+            if (path != null) {
+                File f = new File(path);
+                if (hasFileAccess() && f.exists()) {
+                    target = Uri.fromFile(f).toString();
+                } else if (!prefs.getBoolean("askedFiles", false)) {
+                    prefs.edit().putBoolean("askedFiles", true).apply();
+                    askAllFilesAccess();
+                }
+            }
+        }
+        newTab(target);
     }
 
     // ---------- History ----------
@@ -341,7 +438,7 @@ public class MainActivity extends Activity {
         s.setDisplayZoomControls(false);
         s.setUseWideViewPort(true);
         s.setLoadWithOverviewMode(true);
-        s.setAllowFileAccess(false);
+        s.setAllowFileAccess(true);
         s.setSupportMultipleWindows(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
         s.setUserAgentString(s.getUserAgentString().replace("; wv", ""));
@@ -453,16 +550,25 @@ public class MainActivity extends Activity {
     }
 
     private void loadFromBar() {
-        current().loadUrl(toUrl(urlBar.getText().toString()));
+        String url = toUrl(urlBar.getText().toString());
         urlBar.clearFocus();
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) imm.hideSoftInputFromWindow(urlBar.getWindowToken(), 0);
+        if (url.startsWith("file://") && !hasFileAccess()) {
+            askAllFilesAccess();
+            return;
+        }
+        current().loadUrl(url);
     }
 
     private String toUrl(String input) {
         String t = input.trim();
         if (t.isEmpty()) return HOME;
         if (t.startsWith("http://") || t.startsWith("https://")) return t;
+        if (t.startsWith("file://")) return t;
+        if (t.startsWith("/storage/") || t.startsWith("/sdcard/")) {
+            return "file://" + t.replace(" ", "%20");
+        }
         if (!t.contains(" ") && (t.contains(".") || t.startsWith("localhost"))) {
             return "https://" + t;
         }
@@ -490,7 +596,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        if (intent.getData() != null) newTab(intent.getData().toString());
+        if (intent.getData() != null) openIncoming(intent.getData());
     }
 
     @Override
@@ -526,4 +632,4 @@ public class MainActivity extends Activity {
         tabs.clear();
         super.onDestroy();
     }
-                                      }
+                      }
