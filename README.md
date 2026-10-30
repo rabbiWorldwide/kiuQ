@@ -1,2 +1,1 @@
-# kiuQ
-vibe coded browser by RABBI
+# kiuQ Browser by KiuQ
