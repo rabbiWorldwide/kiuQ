@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>kiuQ</title>
+<style>
+:root{--bg:#ffffff;--fg:#1f1f24;--muted:#6b6b76;--card:#f1f3f4;--accent:#5b3df5}
+@media (prefers-color-scheme: dark){:root{--bg:#101014;--fg:#f2f2f6;--muted:#9a9aa6;--card:#1d1d24}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Roboto,sans-serif}
+body{display:flex;flex-direction:column;align-items:center;padding:56px 20px 40px}
+.logo{width:88px;height:88px}
+h1{margin:14px 0 22px;font-size:30px;letter-spacing:.5px}
+form{width:100%;max-width:520px}
+#q{width:100%;height:50px;border:0;border-radius:25px;padding:0 22px;font-size:16px;background:var(--card);color:var(--fg);outline:2px solid transparent}
+#q:focus{outline-color:var(--accent)}
+.grid{width:100%;max-width:520px;margin-top:34px;display:grid;grid-template-columns:repeat(4,1fr);gap:18px 8px}
+.tile{position:relative;display:flex;flex-direction:column;align-items:center;text-decoration:none;color:var(--fg);font-size:12px}
+.ico{width:56px;height:56px;border-radius:16px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px;font-weight:700;margin-bottom:7px}
+.name{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.add .ico{background:var(--card);color:var(--muted);font-weight:400;font-size:30px}
+.rm{position:absolute;top:-6px;right:6px;width:22px;height:22px;border-radius:50%;background:#e5484d;color:#fff;font-size:15px;line-height:22px;text-align:center;display:none}
+.editing .rm{display:block}
+#edit{margin-top:26px;background:none;border:0;color:var(--muted);font-size:13px;padding:8px 14px}
+.modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;padding:24px}
+.modal.show{display:flex}
+.box{width:100%;max-width:360px;background:var(--bg);border-radius:18px;padding:20px}
+.box h2{margin:0 0 14px;font-size:18px}
+.box input{width:100%;height:44px;margin-bottom:10px;border:0;border-radius:12px;padding:0 14px;font-size:15px;background:var(--card);color:var(--fg)}
+.row{display:flex;gap:10px;justify-content:flex-end;margin-top:6px}
+.row button{border:0;border-radius:12px;padding:10px 18px;font-size:14px;background:var(--card);color:var(--fg)}
+.row .ok{background:var(--accent);color:#fff}
+</style>
+</head>
+<body>
+<svg class="logo" viewBox="0 0 108 108" xmlns="http://www.w3.org/2000/svg">
+  <rect width="108" height="108" rx="26" fill="#5B3DF5"/>
+  <g transform="translate(54 54) scale(1.3) translate(-54 -54)" fill="none" stroke="#fff" stroke-width="7.59">
+    <path d="M34.86,52.68a17.49,17.49 0 1,0 34.98,0a17.49,17.49 0 1,0 -34.98,0"/>
+    <path d="M60.93,61.26L73.14,73.47" stroke-linecap="round"/>
+  </g>
+</svg>
+<h1>kiuQ</h1>
+
+<form id="f" autocomplete="off">
+  <input id="q" type="search" placeholder="Search or type URL" enterkeyhint="search" autocapitalize="off" autocorrect="off" spellcheck="false">
+</form>
+
+<div class="grid" id="grid"></div>
+<button id="edit" type="button">Edit shortcuts</button>
+
+<div class="modal" id="modal">
+  <div class="box">
+    <h2>Add shortcut</h2>
+    <input id="mn" type="text" placeholder="Name (optional)" autocapitalize="words">
+    <input id="mu" type="url" placeholder="Website, e.g. example.com" autocapitalize="off" autocorrect="off">
+    <div class="row">
+      <button type="button" id="mc">Cancel</button>
+      <button type="button" id="mo" class="ok">Add</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var SEARCH = "https://search.brave.com/search?q=";
+var DEFAULTS = [
+  {n:"Google", u:"https://google.com"},
+  {n:"YouTube", u:"https://youtube.com"},
+  {n:"Facebook", u:"https://facebook.com"},
+  {n:"Wikipedia", u:"https://wikipedia.org"},
+  {n:"GitHub", u:"https://github.com"},
+  {n:"ChatGPT", u:"https://chatgpt.com"},
+  {n:"Claude", u:"https://claude.ai"},
+  {n:"Gmail", u:"https://mail.google.com"}
+];
+var COLORS = ["#5b3df5","#e5484d","#0a9d58","#f59e0b","#0ea5e9","#d946ef","#14b8a6","#f97316"];
+var KEY = "kiuq_shortcuts";
+var editing = false;
+
+function load() {
+  try {
+    var s = localStorage.getItem(KEY);
+    if (s) {
+      var a = JSON.parse(s);
+      if (Array.isArray(a)) return a;
+    }
+  } catch (e) {}
+  return DEFAULTS.slice();
+}
+function save(a) {
+  try { localStorage.setItem(KEY, JSON.stringify(a)); } catch (e) {}
+}
+var items = load();
+
+function fixUrl(u) {
+  u = u.trim();
+  if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+  return u;
+}
+function colorFor(n) {
+  var h = 0;
+  for (var j = 0; j < n.length; j++) h += n.charCodeAt(j);
+  return COLORS[h % COLORS.length];
+}
+
+function render() {
+  var g = document.getElementById("grid");
+  g.innerHTML = "";
+  g.className = "grid" + (editing ? " editing" : "");
+  items.forEach(function (it, i) {
+    var a = document.createElement("a");
+    a.className = "tile";
+    a.href = it.u;
+    var ico = document.createElement("div");
+    ico.className = "ico";
+    ico.style.background = colorFor(it.n || "?");
+    ico.textContent = (it.n || "?").charAt(0).toUpperCase();
+    var nm = document.createElement("div");
+    nm.className = "name";
+    nm.textContent = it.n;
+    var rm = document.createElement("span");
+    rm.className = "rm";
+    rm.textContent = "\u00d7";
+    rm.onclick = function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      items.splice(i, 1);
+      save(items);
+      render();
+    };
+    a.onclick = function (e) { if (editing) e.preventDefault(); };
+    a.appendChild(ico);
+    a.appendChild(nm);
+    a.appendChild(rm);
+    g.appendChild(a);
+  });
+  var add = document.createElement("a");
+  add.className = "tile add";
+  add.href = "#";
+  add.innerHTML = '<div class="ico">+</div><div class="name">Add</div>';
+  add.onclick = function (e) { e.preventDefault(); openModal(); };
+  g.appendChild(add);
+}
+
+function openModal() {
+  document.getElementById("mn").value = "";
+  document.getElementById("mu").value = "";
+  document.getElementById("modal").className = "modal show";
+  document.getElementById("mu").focus();
+}
+function closeModal() {
+  document.getElementById("modal").className = "modal";
+}
+
+document.getElementById("mc").onclick = closeModal;
+document.getElementById("mo").onclick = function () {
+  var raw = document.getElementById("mu").value;
+  if (!raw.trim()) return;
+  var url = fixUrl(raw);
+  var name = document.getElementById("mn").value.trim();
+  if (!name) {
+    try { name = new URL(url).hostname.replace(/^www\./, ""); } catch (e) { name = url; }
+  }
+  items.push({n: name, u: url});
+  save(items);
+  closeModal();
+  render();
+};
+
+document.getElementById("edit").onclick = function () {
+  editing = !editing;
+  this.textContent = editing ? "Done" : "Edit shortcuts";
+  render();
+};
+
+document.getElementById("f").addEventListener("submit", function (e) {
+  e.preventDefault();
+  var t = document.getElementById("q").value.trim();
+  if (!t) return;
+  var u;
+  if (/^https?:\/\//i.test(t)) u = t;
+  else if (t.indexOf(" ") < 0 && t.indexOf(".") > 0) u = "https://" + t;
+  else u = SEARCH + encodeURIComponent(t);
+  window.location.href = u;
+});
+
+render();
+</script>
+</body>
+</html>
