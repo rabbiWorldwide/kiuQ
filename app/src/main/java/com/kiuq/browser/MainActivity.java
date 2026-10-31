@@ -46,7 +46,8 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
 
-    private static final String HOME = "https://search.brave.com";
+    private static final String START_PAGE = "file:///android_asset/home.html";
+    private static final String HOME = START_PAGE;
     private static final String SEARCH = "https://search.brave.com/search?q=";
     private static final int MAX_HISTORY = 500;
 
@@ -108,7 +109,7 @@ public class MainActivity extends Activity {
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
             if (view != current()) return;
             progress.setVisibility(View.VISIBLE);
-            if (!urlBar.hasFocus()) urlBar.setText(url);
+            if (!urlBar.hasFocus()) urlBar.setText(shown(url));
         }
 
         @Override
@@ -116,7 +117,7 @@ public class MainActivity extends Activity {
             addHistory(url, view.getTitle());
             if (view != current()) return;
             progress.setVisibility(View.GONE);
-            if (!urlBar.hasFocus()) urlBar.setText(url);
+            if (!urlBar.hasFocus()) urlBar.setText(shown(url));
         }
     };
 
@@ -224,6 +225,13 @@ public class MainActivity extends Activity {
         } else {
             newTab(HOME);
         }
+    }
+
+    // ---------- Start page ----------
+
+    private String shown(String url) {
+        if (url == null || url.startsWith("file:///android_asset/")) return "";
+        return url;
     }
 
     // ---------- Local files ----------
@@ -463,8 +471,7 @@ public class MainActivity extends Activity {
                 w.onPause();
             }
         }
-        String u = tabs.get(index).getUrl();
-        urlBar.setText(u == null ? "" : u);
+        urlBar.setText(shown(tabs.get(index).getUrl()));
         progress.setVisibility(View.GONE);
         updateTabCount();
     }
@@ -554,7 +561,7 @@ public class MainActivity extends Activity {
         urlBar.clearFocus();
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) imm.hideSoftInputFromWindow(urlBar.getWindowToken(), 0);
-        if (url.startsWith("file://") && !hasFileAccess()) {
+        if (url.startsWith("file://") && !url.startsWith(START_PAGE) && !hasFileAccess()) {
             askAllFilesAccess();
             return;
         }
@@ -632,4 +639,4 @@ public class MainActivity extends Activity {
         tabs.clear();
         super.onDestroy();
     }
-                      }
+        }
