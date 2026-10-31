@@ -19,6 +19,7 @@ import android.provider.Settings;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.CookieManager;
@@ -238,12 +239,29 @@ public class MainActivity extends Activity {
 
         CookieManager.getInstance().setAcceptCookie(true);
         setupControls();
+        requestHighRefreshRate();
 
         Uri data = getIntent().getData();
         if (data != null) {
             openIncoming(data);
         } else {
             newTab(HOME);
+        }
+    }
+
+    // ---------- Display ----------
+
+    private void requestHighRefreshRate() {
+        try {
+            float max = 60f;
+            float[] rates = getWindowManager().getDefaultDisplay().getSupportedRefreshRates();
+            for (float r : rates) {
+                if (r > max) max = r;
+            }
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.preferredRefreshRate = max;
+            getWindow().setAttributes(lp);
+        } catch (Exception ignored) {
         }
     }
 
@@ -465,7 +483,6 @@ public class MainActivity extends Activity {
         s.setBuiltInZoomControls(true);
         s.setDisplayZoomControls(false);
         s.setUseWideViewPort(true);
-        s.setLoadWithOverviewMode(true);
         s.setAllowFileAccess(true);
         s.setSupportMultipleWindows(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
@@ -475,7 +492,6 @@ public class MainActivity extends Activity {
 
         w.setWebViewClient(tabClient);
         w.setWebChromeClient(tabChrome);
-        w.setLayerType(View.LAYER_TYPE_HARDWARE, null);       
         w.setDownloadListener(downloader);
     }
 
@@ -495,6 +511,7 @@ public class MainActivity extends Activity {
         urlBar.setText(shown(tabs.get(index).getUrl()));
         progress.setVisibility(View.GONE);
         updateTabCount();
+        tabs.get(index).requestFocus();
     }
 
     private void closeTab(int idx) {
@@ -580,6 +597,7 @@ public class MainActivity extends Activity {
     private void loadFromBar() {
         String url = toUrl(urlBar.getText().toString());
         urlBar.clearFocus();
+        current().requestFocus();
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) imm.hideSoftInputFromWindow(urlBar.getWindowToken(), 0);
         if (url.startsWith("file://") && !url.startsWith(START_PAGE) && !hasFileAccess()) {
@@ -670,4 +688,4 @@ public class MainActivity extends Activity {
         tabs.clear();
         super.onDestroy();
     }
-        }
+                    }
