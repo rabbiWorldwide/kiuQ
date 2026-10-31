@@ -469,12 +469,13 @@ public class MainActivity extends Activity {
         s.setAllowFileAccess(true);
         s.setSupportMultipleWindows(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
-        s.setUserAgentString(s.getUserAgentString().replace("; wv", ""));
+        s.setUserAgentString(s.getUserAgentString().replace("; wv", "").replaceAll("Version/\\d+(\\.\\d+)* ", ""));
 
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, true);
 
         w.setWebViewClient(tabClient);
         w.setWebChromeClient(tabChrome);
+        w.setLayerType(View.LAYER_TYPE_HARDWARE, null);       
         w.setDownloadListener(downloader);
     }
 
