@@ -24,6 +24,7 @@ import android.view.inputmethod.InputMethodManager;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
 import android.webkit.URLUtil;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -50,6 +51,7 @@ public class MainActivity extends Activity {
     private static final String HOME = START_PAGE;
     private static final String SEARCH = "https://search.brave.com/search?q=";
     private static final int MAX_HISTORY = 500;
+    private static final int FILE_CHOOSER = 1001;
 
     private static class HistoryItem {
         String title = "";
@@ -61,6 +63,7 @@ public class MainActivity extends Activity {
     private final ArrayList<HistoryItem> history = new ArrayList<>();
     private int currentIndex = 0;
     private SharedPreferences prefs;
+    private ValueCallback<Uri[]> filePathCallback;
 
     private FrameLayout webContainer;
     private EditText urlBar;
@@ -145,6 +148,23 @@ public class MainActivity extends Activity {
                 int i = tabs.indexOf(window);
                 if (i >= 0) closeTab(i);
             });
+        }
+
+        @Override
+        public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> callback,
+                                         FileChooserParams params) {
+            if (filePathCallback != null) {
+                filePathCallback.onReceiveValue(null);
+            }
+            filePathCallback = callback;
+            try {
+                startActivityForResult(params.createIntent(), FILE_CHOOSER);
+            } catch (Exception e) {
+                filePathCallback = null;
+                toast("Can't open file picker");
+                return false;
+            }
+            return true;
         }
 
         @Override
@@ -598,6 +618,16 @@ public class MainActivity extends Activity {
 
     private void toast(String msg) {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == FILE_CHOOSER && filePathCallback != null) {
+            filePathCallback.onReceiveValue(
+                    WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+            filePathCallback = null;
+        }
     }
 
     @Override
