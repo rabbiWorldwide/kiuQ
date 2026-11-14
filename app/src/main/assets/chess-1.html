@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>দাবা - দুই জন খেলা</title>
+<style>
+:root{
+  --dark:#7d945d; --light:#eeeed2; --accent:#f2c14e; --moveDot:rgba(20,20,20,0.35);
+  --bg:#1f2417; --panel:#2a3020; --text:#f3f3ea;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){ --bg:#faf7ef; --panel:#fff; --text:#222; }
+}
+:root[data-theme="dark"]{ --bg:#1f2417; --panel:#2a3020; --text:#f3f3ea; }
+*{box-sizing:border-box;}
+html,body{height:100%;margin:0; overflow-x:hidden;}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  display:flex; flex-direction:column; align-items:center;
+  padding-top:calc(16px + env(safe-area-inset-top,0px));
+  padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));
+  padding-left:12px; padding-right:12px;
+  min-height:100%;
+  touch-action:manipulation;
+}
+h1{font-size:1.2rem; margin:4px 0 10px;}
+#status{font-size:1rem; margin-bottom:10px; min-height:1.3em; text-align:center;}
+#board{
+  display:grid; grid-template-columns:repeat(8,1fr); grid-template-rows:repeat(8,1fr);
+  width:min(94vw, 82vh, 480px);
+  aspect-ratio:1/1;
+  border:3px solid var(--panel); border-radius:6px; overflow:hidden;
+  box-shadow:0 4px 14px rgba(0,0,0,0.35);
+  touch-action:manipulation;
+}
+.sq{position:relative; display:flex; align-items:center; justify-content:center;
+  font-size:min(9.5vw, 8vh, 42px); line-height:1; user-select:none; cursor:pointer;
+  -webkit-tap-highlight-color:transparent;}
+.light{background:var(--light);}
+.dark{background:var(--dark);}
+.piece{position:relative; z-index:1;}
+.wpiece{color:#e21c1c; text-shadow:0 0 2px #000, 0 0 4px rgba(0,0,0,0.6), 0 2px 3px rgba(0,0,0,0.5);}
+.bpiece{color:#0a0a0a; text-shadow:0 0 2px #fff, 0 0 4px rgba(255,255,255,0.6), 0 1px 2px rgba(255,255,255,0.4);}
+.selected{outline:3px solid var(--accent); outline-offset:-3px;}
+.lastmove{box-shadow:inset 0 0 0 3px rgba(242,193,78,0.55);}
+.check{background:#d9534f !important;}
+.dot::after{content:""; position:absolute; width:26%; height:26%; border-radius:50%; background:var(--moveDot);}
+.dotcap::after{content:""; position:absolute; width:80%; height:80%; border-radius:50%;
+  border:4px solid var(--moveDot); background:transparent;}
+.coord{position:absolute; font-size:9px; opacity:0.55; bottom:1px; right:2px; pointer-events:none;}
+#controls{display:flex; gap:10px; margin-top:14px;}
+button{
+  background:var(--panel); color:var(--text); border:1px solid rgba(255,255,255,0.15);
+  padding:8px 14px; border-radius:8px; font-size:0.9rem; cursor:pointer;
+}
+button:active{opacity:0.8;}
+#promoModal{
+  position:fixed; inset:0; background:rgba(0,0,0,0.55); display:none;
+  align-items:center; justify-content:center; z-index:10;
+}
+#promoBox{background:var(--panel); padding:16px; border-radius:10px; display:flex; gap:10px;}
+#promoBox button{font-size:1.6rem; padding:10px 14px;}
+#log{width:min(94vw, 82vh, 480px); max-height:110px; overflow-y:auto; font-size:0.82rem;
+  background:var(--panel); border-radius:8px; padding:8px 10px; margin-top:12px; opacity:0.85;}
+</style>
+</head>
+<body>
+<h1>♟️ দাবা — দুই খেলোয়াড়</h1>
+<div id="status">লালের চাল</div>
+<div id="board"></div>
+<div id="controls">
+  <button id="undoBtn">আনডু</button>
+  <button id="resetBtn">নতুন খেলা</button>
+</div>
+<div id="log"></div>
+
+<div id="promoModal">
+  <div id="promoBox"></div>
+</div>
+
+<script>
+const PIECES = {
+  wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙',
+  bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟'
+};
+const files='abcdefgh';
+
+let audioCtx=null;
+function playTone(freq,dur,type='sine',vol=0.18){
+  try{
+    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type=type; osc.frequency.value=freq;
+    gain.gain.value=vol;
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    const now = audioCtx.currentTime;
+    gain.gain.setValueAtTime(vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now+dur);
+    osc.start(now); osc.stop(now+dur);
+  }catch(e){}
+}
+function sound(kind){
+  if(kind==='move') playTone(420,0.09,'triangle',0.16);
+  else if(kind==='capture'){ playTone(220,0.07,'square',0.15); setTimeout(()=>playTone(160,0.1,'square',0.13),40); }
+  else if(kind==='castle'){ playTone(500,0.08,'triangle',0.15); setTimeout(()=>playTone(650,0.08,'triangle',0.15),70); }
+  else if(kind==='check') playTone(880,0.18,'sawtooth',0.16);
+  else if(kind==='end'){ playTone(300,0.15,'sawtooth',0.18); setTimeout(()=>playTone(200,0.25,'sawtooth',0.18),150); }
+}
+
+function initialBoard(){
+  const back=['R','N','B','Q','K','B','N','R'];
+  const b=Array.from({length:8},()=>Array(8).fill(null));
+  for(let c=0;c<8;c++){
+    b[0][c]='b'+back[c];
+    b[1][c]='bP';
+    b[6][c]='wP';
+    b[7][c]='w'+back[c];
+  }
+  return b;
+}
+
+let state = {
+  board: initialBoard(),
+  turn: 'w',
+  moved: {wK:false,bK:false,wRa:false,wRh:false,bRa:false,bRh:false},
+  ep: null, // {row,col} square behind a pawn that just double-moved
+  history: [], // stack of {board,turn,moved,ep,lastMove}
+  lastMove: null,
+  selected: null,
+  legalForSelected: [],
+  gameOver: false
+};
+
+function clone(b){ return b.map(r=>r.slice()); }
+
+function inB(r,c){ return r>=0&&r<8&&c>=0&&c<8; }
+
+function findKing(board,color){
+  for(let r=0;r<8;r++) for(let c=0;c<8;c++){
+    if(board[r][c]===color+'K') return {row:r,col:c};
+  }
+  return null;
+}
+
+function isSquareAttacked(board,row,col,byColor){
+  const dir = byColor==='w'? -1: 1; // pawn attack direction toward target from attacker's perspective
+  // pawn attacks: attacker pawns sit at row+dir? Actually attacker pawn at (row - (attackerMoveDir), col±1)
+  const pawnRow = byColor==='w'? row+1 : row-1;
+  for(const dc of [-1,1]){
+    const pr=pawnRow, pc=col+dc;
+    if(inB(pr,pc) && board[pr][pc]===byColor+'P') return true;
+  }
+  // knight
+  const kn=[[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
+  for(const [dr,dc] of kn){
+    const r=row+dr,c=col+dc;
+    if(inB(r,c) && board[r][c]===byColor+'N') return true;
+  }
+  // king
+  for(let dr=-1;dr<=1;dr++) for(let dc=-1;dc<=1;dc++){
+    if(dr===0&&dc===0) continue;
+    const r=row+dr,c=col+dc;
+    if(inB(r,c) && board[r][c]===byColor+'K') return true;
+  }
+  // sliding: rook/queen straight
+  const straight=[[-1,0],[1,0],[0,-1],[0,1]];
+  for(const [dr,dc] of straight){
+    let r=row+dr,c=col+dc;
+    while(inB(r,c)){
+      const p=board[r][c];
+      if(p){
+        if(p[0]===byColor && (p[1]==='R'||p[1]==='Q')) return true;
+        break;
+      }
+      r+=dr; c+=dc;
+    }
+  }
+  // sliding: bishop/queen diagonal
+  const diag=[[-1,-1],[-1,1],[1,-1],[1,1]];
+  for(const [dr,dc] of diag){
+    let r=row+dr,c=col+dc;
+    while(inB(r,c)){
+      const p=board[r][c];
+      if(p){
+        if(p[0]===byColor && (p[1]==='B'||p[1]==='Q')) return true;
+        break;
+      }
+      r+=dr; c+=dc;
+    }
+  }
+  return false;
+}
+
+function pseudoMoves(st, row, col){
+  const board=st.board;
+  const piece=board[row][col];
+  if(!piece) return [];
+  const color=piece[0], type=piece[1];
+  const moves=[];
+  const push=(r,c,flags={})=>{ if(inB(r,c)) moves.push({from:{row,col},to:{row:r,col:c},...flags}); };
+
+  if(type==='P'){
+    const dir = color==='w'? -1: 1;
+    const startRow = color==='w'? 6: 1;
+    const promoRow = color==='w'? 0: 7;
+    if(inB(row+dir,col) && !board[row+dir][col]){
+      push(row+dir,col,{promotion: row+dir===promoRow});
+      if(row===startRow && !board[row+2*dir][col]){
+        push(row+2*dir,col,{doubleStep:true});
+      }
+    }
+    for(const dc of [-1,1]){
+      const r=row+dir,c=col+dc;
+      if(inB(r,c)){
+        const target=board[r][c];
+        if(target && target[0]!==color){
+          push(r,c,{capture:true, promotion:r===promoRow});
+        } else if(!target && st.ep && st.ep.row===r && st.ep.col===c){
+          push(r,c,{capture:true, enPassant:true});
+        }
+      }
+    }
+  } else if(type==='N'){
+    const kn=[[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
+    for(const [dr,dc] of kn){
+      const r=row+dr,c=col+dc;
+      if(inB(r,c)){
+        const t=board[r][c];
+        if(!t || t[0]!==color) push(r,c,{capture:!!t});
+      }
+    }
+  } else if(type==='B'||type==='R'||type==='Q'){
+    let dirs=[];
+    if(type==='B') dirs=[[-1,-1],[-1,1],[1,-1],[1,1]];
+    else if(type==='R') dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+    else dirs=[[-1,-1],[-1,1],[1,-1],[1,1],[-1,0],[1,0],[0,-1],[0,1]];
+    for(const [dr,dc] of dirs){
+      let r=row+dr,c=col+dc;
+      while(inB(r,c)){
+        const t=board[r][c];
+        if(!t){ push(r,c,{}); }
+        else{
+          if(t[0]!==color) push(r,c,{capture:true});
+          break;
+        }
+        r+=dr; c+=dc;
+      }
+    }
+  } else if(type==='K'){
+    for(let dr=-1;dr<=1;dr++) for(let dc=-1;dc<=1;dc++){
+      if(dr===0&&dc===0) continue;
+      const r=row+dr,c=col+dc;
+      if(inB(r,c)){
+        const t=board[r][c];
+        if(!t || t[0]!==color) push(r,c,{capture:!!t});
+      }
+    }
+    // castling
+    const homeRow = color==='w'? 7: 0;
+    if(row===homeRow && col===4 && !st.moved[color+'K'] && !isSquareAttacked(board,row,col,color==='w'?'b':'w')){
+      // kingside
+      const rHFlag = color+'Rh';
+      if(!st.moved[rHFlag] && board[row][7]===color+'R' && !board[row][5] && !board[row][6]){
+        if(!isSquareAttacked(board,row,5,color==='w'?'b':'w') && !isSquareAttacked(board,row,6,color==='w'?'b':'w')){
+          push(row,6,{castle:'K'});
+        }
+      }
+      const rAFlag = color+'Ra';
+      if(!st.moved[rAFlag] && board[row][0]===color+'R' && !board[row][1] && !board[row][2] && !board[row][3]){
+        if(!isSquareAttacked(board,row,3,color==='w'?'b':'w') && !isSquareAttacked(board,row,2,color==='w'?'b':'w')){
+          push(row,2,{castle:'Q'});
+        }
+      }
+    }
+  }
+  return moves;
+}
+
+function applyMove(st, move, promoChoice){
+  const board = clone(st.board);
+  const moved = {...st.moved};
+  let ep = null;
+  const piece = board[move.from.row][move.from.col];
+  const color = piece[0];
+
+  if(move.enPassant){
+    board[move.from.row][move.to.col] = null; // captured pawn is on from.row, to.col
+  }
+  board[move.to.row][move.to.col] = piece;
+  board[move.from.row][move.from.col] = null;
+
+  if(move.promotion){
+    board[move.to.row][move.to.col] = color + (promoChoice||'Q');
+  }
+
+  if(move.castle==='K'){
+    board[move.from.row][5] = board[move.from.row][7];
+    board[move.from.row][7] = null;
+  } else if(move.castle==='Q'){
+    board[move.from.row][3] = board[move.from.row][0];
+    board[move.from.row][0] = null;
+  }
+
+  if(piece[1]==='K') moved[color+'K']=true;
+  if(piece[1]==='R'){
+    if(move.from.col===0) moved[color+'Ra']=true;
+    if(move.from.col===7) moved[color+'Rh']=true;
+  }
+  // rook captured also disables castling
+  const capturedRookRow = color==='w'?0:7;
+  if(move.to.row===capturedRookRow){
+    if(move.to.col===0) moved[(color==='w'?'b':'w')+'Ra']=true;
+    if(move.to.col===7) moved[(color==='w'?'b':'w')+'Rh']=true;
+  }
+
+  if(move.doubleStep){
+    ep = {row:(move.from.row+move.to.row)/2, col: move.from.col};
+  }
+
+  return {board, moved, ep};
+}
+
+function legalMovesFor(st, row, col){
+  const piece = st.board[row][col];
+  if(!piece || piece[0]!==st.turn) return [];
+  const pseudo = pseudoMoves(st, row, col);
+  const legal = [];
+  for(const m of pseudo){
+    const {board} = applyMove(st, m, 'Q');
+    const kingPos = findKing(board, st.turn);
+    if(kingPos && !isSquareAttacked(board, kingPos.row, kingPos.col, st.turn==='w'?'b':'w')){
+      legal.push(m);
+    }
+  }
+  return legal;
+}
+
+function allLegalMoves(st, color){
+  let all=[];
+  for(let r=0;r<8;r++) for(let c=0;c<8;c++){
+    const p=st.board[r][c];
+    if(p && p[0]===color){
+      all = all.concat(legalMovesFor({...st,turn:color}, r, c));
+    }
+  }
+  return all;
+}
+
+function inCheck(st, color){
+  const k = findKing(st.board, color);
+  if(!k) return false;
+  return isSquareAttacked(st.board, k.row, k.col, color==='w'?'b':'w');
+}
+
+const boardEl = document.getElementById('board');
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+const promoModal = document.getElementById('promoModal');
+const promoBox = document.getElementById('promoBox');
+
+function squareId(r,c){ return files[c]+(8-r); }
+
+function render(){
+  boardEl.innerHTML='';
+  const kingPos = findKing(state.board, state.turn);
+  const inChk = kingPos && isSquareAttacked(state.board, kingPos.row, kingPos.col, state.turn==='w'?'b':'w');
+
+  for(let r=0;r<8;r++){
+    for(let c=0;c<8;c++){
+      const sq = document.createElement('div');
+      sq.className = 'sq ' + ((r+c)%2===0?'light':'dark');
+      const piece = state.board[r][c];
+      if(piece){
+        const span = document.createElement('span');
+        span.className = 'piece ' + (piece[0]==='w' ? 'wpiece' : 'bpiece');
+        span.textContent = PIECES[piece];
+        sq.appendChild(span);
+      }
+
+      if(state.lastMove && ((state.lastMove.from.row===r&&state.lastMove.from.col===c)||(state.lastMove.to.row===r&&state.lastMove.to.col===c))){
+        sq.classList.add('lastmove');
+      }
+      if(state.selected && state.selected.row===r && state.selected.col===c){
+        sq.classList.add('selected');
+      }
+      if(inChk && kingPos.row===r && kingPos.col===c){
+        sq.classList.add('check');
+      }
+      const mv = state.legalForSelected.find(m=>m.to.row===r&&m.to.col===c);
+      if(mv){
+        sq.classList.add(mv.capture ? 'dotcap' : 'dot');
+      }
+      if(c===0){
+        const coord=document.createElement('span');
+        coord.className='coord'; coord.textContent=8-r;
+        sq.appendChild(coord);
+      }
+      sq.addEventListener('click', ()=>onSquareClick(r,c));
+      boardEl.appendChild(sq);
+    }
+  }
+}
+
+function onSquareClick(r,c){
+  if(state.gameOver) return;
+  const piece = state.board[r][c];
+
+  if(state.selected){
+    const move = state.legalForSelected.find(m=>m.to.row===r&&m.to.col===c);
+    if(move){
+      makeMove(move);
+      return;
+    }
+  }
+  if(piece && piece[0]===state.turn){
+    state.selected = {row:r,col:c};
+    state.legalForSelected = legalMovesFor(state, r, c);
+  } else {
+    state.selected = null;
+    state.legalForSelected = [];
+  }
+  render();
+}
+
+function makeMove(move){
+  state.history.push(JSON.parse(JSON.stringify({
+    board: state.board, turn: state.turn, moved: state.moved, ep: state.ep, lastMove: state.lastMove
+  })));
+
+  const finish = (promoChoice)=>{
+    const result = applyMove(state, move, promoChoice);
+    state.board = result.board;
+    state.moved = result.moved;
+    state.ep = result.ep;
+    state.lastMove = move;
+    state.turn = state.turn==='w'?'b':'w';
+    state.selected = null;
+    state.legalForSelected = [];
+    addLog(move, promoChoice);
+    if(move.castle) sound('castle');
+    else if(move.capture) sound('capture');
+    else sound('move');
+    checkGameEnd();
+    render();
+  };
+
+  if(move.promotion){
+    showPromoModal(state.turn, finish);
+  } else {
+    finish(null);
+  }
+}
+
+function showPromoModal(color, cb){
+  promoBox.innerHTML='';
+  const options=['Q','R','B','N'];
+  for(const o of options){
+    const btn=document.createElement('button');
+    btn.textContent = PIECES[color+o];
+    btn.addEventListener('click', ()=>{
+      promoModal.style.display='none';
+      cb(o);
+    });
+    promoBox.appendChild(btn);
+  }
+  promoModal.style.display='flex';
+}
+
+function addLog(move, promo){
+  const from = squareId(move.from.row, move.from.col);
+  const to = squareId(move.to.row, move.to.col);
+  const piece = state.history.length; // just use count as move number rough
+  let text = from+'→'+to;
+  if(move.castle==='K') text = 'O-O';
+  if(move.castle==='Q') text = 'O-O-O';
+  if(promo) text += '='+promo;
+  const entry = document.createElement('div');
+  entry.textContent = text;
+  logEl.appendChild(entry);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function checkGameEnd(){
+  const moves = allLegalMoves(state, state.turn);
+  const chk = inCheck(state, state.turn);
+  const colorName = state.turn==='w' ? 'লাল' : 'কালো';
+  if(moves.length===0){
+    state.gameOver = true;
+    sound('end');
+    if(chk){
+      statusEl.textContent = (state.turn==='w'?'কালো':'লাল') + ' জিতেছে — চেকমেট!';
+    } else {
+      statusEl.textContent = 'স্টেলমেট — ড্র!';
+    }
+  } else {
+    statusEl.textContent = colorName + 'র চাল' + (chk ? ' — চেক!' : '');
+    if(chk) setTimeout(()=>sound('check'),120);
+  }
+}
+
+document.getElementById('undoBtn').addEventListener('click', ()=>{
+  if(state.history.length===0) return;
+  const prev = state.history.pop();
+  state.board = prev.board;
+  state.turn = prev.turn;
+  state.moved = prev.moved;
+  state.ep = prev.ep;
+  state.lastMove = prev.lastMove;
+  state.selected = null;
+  state.legalForSelected = [];
+  state.gameOver = false;
+  if(logEl.lastChild) logEl.removeChild(logEl.lastChild);
+  statusEl.textContent = (state.turn==='w'?'লালের':'কালোর') + ' চাল';
+  render();
+});
+
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  state = {
+    board: initialBoard(), turn:'w',
+    moved:{wK:false,bK:false,wRa:false,wRh:false,bRa:false,bRh:false},
+    ep:null, history:[], lastMove:null, selected:null, legalForSelected:[], gameOver:false
+  };
+  logEl.innerHTML='';
+  statusEl.textContent = 'লালের চাল';
+  render();
+});
+
+render();
+</script>
+</body>
+</html>
