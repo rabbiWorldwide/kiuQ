@@ -109,6 +109,11 @@ function render() {
   var g = document.getElementById("grid");
   g.innerHTML = "";
   g.className = "grid" + (editing ? " editing" : "");
+  var gm = document.createElement("a");
+  gm.className = "tile";
+  gm.href = "chess-1.html";
+  gm.innerHTML = '<div class="ico" style="background:#7d945d;font-size:30px">\u265E</div><div class="name">Chess</div>';
+  g.appendChild(gm);
   items.forEach(function (it, i) {
     var a = document.createElement("a");
     a.className = "tile";
